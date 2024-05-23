@@ -1,68 +1,129 @@
-Certainly! Automating the download of resumes for all candidates from a web page using Selenium in Python is a common task. Here’s a high-level guide on how you can achieve this:
-
-Setup Selenium: First, make sure you have Selenium installed. You can install it using pip:
-Python
-
-pip install selenium
-AI で生成されたコード。ご確認のうえ、慎重にご使用ください。FAQ で詳細を確認。
-Create a Selenium Script: Write a Python script that uses Selenium to navigate through the list of candidates, click on each candidate’s detail page, and download their resumes.
-Locate Elements: Identify the HTML elements (such as buttons, links, or input fields) that allow you to navigate to the candidate detail pages and download the resumes. You’ll need to use Selenium’s find_element_by_* methods to locate these elements.
-Iterate Through Candidates: Use a loop to iterate through the list of candidates. For each candidate:
-Click on the candidate’s detail page link.
-Locate the resume download link/button.
-Trigger the download action.
-Handle Paging: If the list page includes paging controls, you’ll need to handle pagination. You can navigate to the next page using Selenium and repeat the process for each page.
-Download Resumes: For each candidate, download their resume to a specified directory on your local machine. You can use Python’s requests library to download files.
-Here’s a simplified example of how you might structure your Selenium script:
-
-Python
-
-from selenium import webdriver
+import undetected_chromedriver as uc
 import time
+import os
+import glob
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from pathlib import Path
+import logging
+logging.basicConfig(filename='output.log', encoding='utf-8', level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-# Initialize Selenium WebDriver (choose the appropriate browser driver)
-driver = webdriver.Chrome(executable_path='/path/to/chromedriver')
+chromeOptions = uc.ChromeOptions()
+downloadFile_dir = 'D:\\work\\youDirector'
+chromeOptions.add_experimental_option('prefs', {
+    'download.default_directory' : downloadFile_dir,
+    'download.prompt_for_download' : False,
+    'download.directory_upgrade' : True,
+    'plugins.always_open_pdf_externally' : True
+})
+chromeOptions.headless = True
+driver = uc.Chrome(use_subprocess=True, options=chromeOptions)
 
-# Navigate to the list page
-driver.get('https://example.com/candidate-list')
+current_page = 1
 
-# Loop through candidates
-for page in range(1, total_pages + 1):  # Adjust based on your pagination logic
-    candidate_links = driver.find_elements_by_css_selector('.candidate-link')
+#check if download completed
+def is_download_finished(temp_folder):
+    chrome_temp_file = sorted(Path(temp_folder).glob('*.crdownload'))
+    chrome_temp_file2 = sorted(Path(temp_folder).glob('*.tmp'))
+    chrome_temp_file3 = sorted(Path(temp_folder).glob('*.md'))
+    downloaded_files = sorted(Path(temp_folder).glob('*.*'))
+    if (len(chrome_temp_file) == 0) and \
+       (len(chrome_temp_file2) == 0) and \
+       (len(chrome_temp_file3) == 0) and \
+       (len(downloaded_files) >= 1):
+        return True
+    else:
+        return False
+
+#rename file after downloaded
+def rename_last_downloaded_file(new_name):
+    files  =glob.glob(os.path.join(downloadFile_dir, '*'))
+    last_downloaded_file = max(files, key=os.path.getctime)
+    file_extension = os.path.splitext(last_downloaded_file)[1]
+    new_file_name = os.path.join(downloadFile_dir, new_name + file_extension)
+    try:
+        os.rename(last_downloaded_file, new_file_name)
+        time.sleep(2)
+        logger.info(f'rename from {last_downloaded_file} -> {new_file_name} ')
+    except Exception as e:
+            logger.info(e)
+    return new_file_name
+
+# Function to download a candidate's resume
+def download_resume(candidate_urls):
+    for key, value in candidate_urls.items():
+        driver.get(value)
+        time.sleep(2)
+        # Find the download resume button and click it
+        try:
+            download_links = driver.find_elements(By.CSS_SELECTOR,"a.candidacy-profile-outline__file-link")
+            for link in download_links:
+                link.click()
+                time.sleep(5)
+                if is_download_finished(downloadFile_dir):
+                    rename_last_downloaded_file(key + '_' +link.text)
+                else:
+                    time.sleep(2)
+
+            #download interview rgs memo
+            driver.get(value+"#files")
+            time.sleep(2)
+            download_memos = driver.find_elements(By.XPATH,"//div[@class='event-dragenter']")
+            for memo in download_memos:
+                memoSpan = memo.find_element(By.XPATH,".//span[@class='A_cuej6r6Yeu5OaYyWLT']")
+                if memoSpan.text == 'その他':
+                    memoLink = memo.find_elements(By.XPATH,".//a[@class='eAQLTDDUjSFnLSLcS9Lg']")
+                    for link in memoLink:
+                        link.click()
+                        time.sleep(5)
+
+            driver.back()
+        except Exception as e:
+            logger.info(e)
+            driver.back()
+            continue
+
+driver.get("https://XXXXX/login")
+
+uname = driver.find_element(By.NAME, "email")
+uname.send_keys("yourEmail")
+passwd = driver.find_element(By.NAME, "password")
+passwd.send_keys("yourPassword")
+driver.find_element(By.CSS_SELECTOR, "button").click()
+
+driver.get(f"https://XXXXX/detail?page={current_page}")
+time.sleep(2)
+
+# Iterate through all pages and download resumes
+while True:
+
+    # Find the list of candidate links on the current page
+    candidate_links = driver.find_elements(By.CSS_SELECTOR,"a.terminated-candidacies-table-list__profile-cell-text")
+    logger.info(f'candidate_links len:{len(candidate_links)}')
+
+    candidate_urls = {}
+    # Download resumes for each candidate on the current page
     for link in candidate_links:
-        link.click()  # Go to candidate detail page
-        # Locate the resume download link/button
-        resume_link = driver.find_element_by_css_selector('.resume-download-link')
-        resume_url = resume_link.get_attribute('href')
-        # Download the resume using requests or any other method
-        # Save the resume to a local directory
-        # ...
+        candidate_urls[link.find_element(By.CSS_SELECTOR,"span.terminated-candidacies-table-list__name-box").text] = link.get_attribute("href")
 
-        # Go back to the list page
-        driver.back()
+    logger.info(candidate_urls)
+    download_resume(candidate_urls)
+    logger.info(f'page {current_page} Done!')
 
-    # Go to the next page (if applicable)
-    next_page_button = driver.find_element_by_css_selector('.next-page-button')
-    next_page_button.click()
+    # Check if there is a next page
+    try:
+        #force back to candidate page
+        driver.get(f"https://XXXXX/detail?page={current_page}")
+        time.sleep(2)
+        next_button = driver.find_element(By.CSS_SELECTOR,"a.pagination__next")
+        next_button.click()
+        current_page += 1
+        time.sleep(5)  # Wait for the next page to load
+    except Exception as e:
+        logger.info(e)
+        break  # No more pages, exit the loop
 
-# Clean up
-driver.quit()
-AI で生成されたコード。ご確認のうえ、慎重にご使用ください。FAQ で詳細を確認。
-Remember to replace the placeholders (/path/to/chromedriver, CSS selectors, URLs, etc.) with actual values from your website. Additionally, handle any authentication, session management, or other specific requirements your site may have.
-
-For more detailed examples and best practices, refer to the Selenium documentation and other online resources1234. Happy automating! 🤖🚀
-
-詳細情報
-
-1
-
-hiration.com
-2
-
-mindmajix.com
-3
-
-anywhere.epam.com
-4
-
-33rdsquare.com
+# Close the browser
+driver.close()
